@@ -1,6 +1,8 @@
 import type { NextApiRequest, NextApiResponse } from 'next';
 import { supabase } from '@/lib/supabase';
-import { generatePrivateKey, privateKeyToAccount } from 'viem/accounts';
+import { createWalletFromPrivateKey } from '@/lib/wallet-utils';
+import { waitForTransaction } from '@/lib/monad';
+import { parseEther } from 'viem';
 
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
     if (req.method !== 'POST') {
@@ -29,7 +31,52 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
             return res.status(400).json({ error: 'Insufficient funds' });
         }
 
-        // 2. Deduct from payer wallet
+        // 2. Get provider wallet for address
+        const { data: providerWallet, error: providerError } = await supabase
+            .from('wallets')
+            .select('evm_address')
+            .eq('agent_id', providerAgentId)
+            .single();
+
+        if (providerError || !providerWallet) {
+            return res.status(404).json({ error: 'Provider wallet not found' });
+        }
+
+        // 3. Send real blockchain transaction (transfer MON from payer to provider as escrow demo)
+        // In a real escrow contract, this would call a smart contract instead
+        let txHash: `0x${string}`;
+
+        if (payerWallet.evm_private_key && payerWallet.evm_address !== '0x0000000000000000000000000000000000000000') {
+            try {
+                const { walletClient } = createWalletFromPrivateKey(payerWallet.evm_private_key as `0x${string}`);
+
+                // Send transaction to lock funds
+                // For demo: we're sending MON directly. In production, this would interact with an escrow smart contract
+                const amountInMON = (amount * 0.0001).toString(); // Convert dUSD to MON (simulated rate)
+
+                txHash = await walletClient.sendTransaction({
+                    to: providerWallet.evm_address as `0x${string}`,
+                    value: parseEther(amountInMON),
+                    gas: BigInt(21000), // Standard gas limit for a simple native currency transfer
+                });
+
+                // Wait for confirmation
+                await waitForTransaction(txHash);
+
+            } catch (error: any) {
+                console.error('Blockchain transaction failed:', error);
+                return res.status(500).json({
+                    error: 'Transaction failed',
+                    details: error.message,
+                    hint: 'Make sure the wallet has sufficient MON for gas fees'
+                });
+            }
+        } else {
+            // Fallback to simulation if no real wallet configured
+            txHash = ('0x' + Array.from({ length: 64 }, () => Math.floor(Math.random() * 16).toString(16)).join('')) as `0x${string}`;
+        }
+
+        // 4. Deduct from payer balance (dUSD tracking)
         const { error: updateError } = await supabase
             .from('wallets')
             .update({ balance: payerWallet.balance - amount })
@@ -39,15 +86,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
             throw updateError;
         }
 
-        // 3. Simulate Monad Transaction
-        // In a real app, we would sign and send a transaction here using viem
-        // const account = privateKeyToAccount(payerWallet.evm_private_key as `0x${string}`);
-        // const hash = await walletClient.sendTransaction(...)
-
-        // For demo, we generate a random hash that looks like a Monad TX
-        const txHash = '0x' + Array.from({ length: 64 }, () => Math.floor(Math.random() * 16).toString(16)).join('');
-
-        // 4. Create escrow
+        // 5. Create escrow record
         const { data: escrow, error: escrowError } = await supabase
             .from('escrows')
             .insert({

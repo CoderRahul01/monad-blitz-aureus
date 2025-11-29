@@ -28,18 +28,25 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
             return res.status(400).json({ error: 'Escrow already released' });
         }
 
-        // 2. Update escrow status
+        // 2. Generate release transaction hash
+        // In a real implementation with a smart contract, this would call the contract's release function
+        // For this demo, we're just marking it as released in the database
+        const releaseTxHash = '0x' + Array.from({ length: 64 }, () => Math.floor(Math.random() * 16).toString(16)).join('');
+
+        // 3. Update escrow status
         const { error: updateEscrowError } = await supabase
             .from('escrows')
-            .update({ status: 'released' })
+            .update({
+                status: 'released',
+                release_tx_hash: releaseTxHash
+            })
             .eq('id', escrowId);
 
         if (updateEscrowError) {
             throw updateEscrowError;
         }
 
-        // 3. Credit provider wallet
-        // First get provider wallet
+        // 4. Credit provider wallet
         const { data: providerWallet, error: walletError } = await supabase
             .from('wallets')
             .select('*')
@@ -60,7 +67,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
             throw updateWalletError;
         }
 
-        return res.status(200).json({ success: true, escrowId });
+        return res.status(200).json({ success: true, escrowId, releaseTxHash });
     } catch (error: any) {
         console.error('Error releasing escrow:', error);
         return res.status(500).json({ error: error.message });
