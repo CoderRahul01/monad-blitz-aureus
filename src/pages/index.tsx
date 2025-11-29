@@ -42,6 +42,14 @@ export default function Home() {
     try {
       const res = await fetch('/api/state');
       const data = await res.json();
+
+      // Check if the response is an error
+      if (data.code || data.error || !data.agents) {
+        console.error('Error fetching state:', data);
+        setStatus('⚠️ Supabase not configured. Please set up your database.', 'warning');
+        return;
+      }
+
       setState(data);
     } catch (error) {
       console.error('Failed to fetch state', error);
@@ -124,9 +132,33 @@ export default function Home() {
   };
 
   if (!state) return (
-    <div style={{ padding: 20, textAlign: 'center' }}>
-      <div style={{ fontSize: 18, marginBottom: 10 }}>⚡ Loading Aureus System...</div>
-      <div style={{ fontSize: 14, color: '#888' }}>Connecting to Monad Testnet</div>
+    <div style={{ padding: 40, textAlign: 'center', maxWidth: 600, margin: '0 auto' }}>
+      <h1 style={{ fontSize: 32 }}>⚡ AUREUS</h1>
+      <div style={{ fontSize: 18, marginBottom: 20, color: '#666' }}>The payment layer for autonomous agents</div>
+
+      {statusType === 'warning' ? (
+        <div style={{
+          background: '#fff3cd',
+          color: '#856404',
+          padding: 20,
+          borderRadius: 8,
+          textAlign: 'left',
+          marginTop: 20
+        }}>
+          <h3 style={{ marginTop: 0 }}>⚠️ Supabase Setup Required</h3>
+          <p>To use Aureus, you need to configure Supabase:</p>
+          <ol style={{ textAlign: 'left', paddingLeft: 20 }}>
+            <li>Create a project at <a href="https://supabase.com" target="_blank" rel="noreferrer">supabase.com</a></li>
+            <li>Run the SQL from <code>supabase/schema.sql</code></li>
+            <li>Update <code>.env.local</code> with your Supabase URL and key</li>
+            <li>Restart the dev server</li>
+          </ol>
+        </div>
+      ) : (
+        <div style={{ fontSize: 18, marginBottom: 10, color: '#888' }}>
+          ⚡ Loading Aureus System...
+        </div>
+      )}
     </div>
   );
 
