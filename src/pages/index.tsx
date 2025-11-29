@@ -1,25 +1,33 @@
 import { useState, useEffect } from 'react';
 import Head from 'next/head';
+import { MONAD_EXPLORER_URL } from '@/lib/monad';
 
-// Types (mirroring backend)
-type EscrowStatus = 'locked' | 'released';
+// Types
+interface Wallet {
+  id: string;
+  balance: number;
+  currency: string;
+  evm_address?: string;
+}
+
+interface Agent {
+  id: string;
+  name: string;
+  wallets: Wallet[];
+}
 
 interface Escrow {
   id: string;
-  payer: string;
-  provider: string;
+  payer_agent: string;
+  provider_agent: string;
   amount: number;
-  status: EscrowStatus;
-  createdAt: number;
-  txHash: string;
-  releaseTxHash?: string;
+  status: 'locked' | 'released';
+  tx_hash?: string;
+  created_at: string;
 }
 
 interface State {
-  balances: {
-    AgentA: number;
-    AgentB: number;
-  };
+  agents: Agent[];
   escrows: Escrow[];
 }
 
@@ -43,15 +51,30 @@ export default function Home() {
     fetchState();
   }, []);
 
+  // Helper to find agents
+  const agentA = state?.agents.find(a => a.name === 'Agent A') || state?.agents[0];
+  const agentB = state?.agents.find(a => a.name === 'Agent B') || state?.agents[1];
+
   const handleRequestCompute = async () => {
+    if (!agentA || !agentB) return;
+
     setLoading(true);
     setStatusMsg('Locking funds in escrow...');
     try {
-      const res = await fetch('/api/state?action=create', { method: 'POST' });
+      const res = await fetch('/api/escrow/create', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          payerAgentId: agentA.id,
+          providerAgentId: agentB.id,
+          amount: 10
+        }),
+      });
       const data = await res.json();
+
       if (res.ok) {
-        setState(data); // API returns updated state
-        setStatusMsg(`Funds locked! Tx: ${data.txHash}`);
+        await fetchState(); // Refresh state
+        setStatusMsg(`Funds locked! Tx: ${data.tx_hash?.slice(0, 10)}...`);
       } else {
         setStatusMsg(`Error: ${data.error}`);
       }
@@ -62,19 +85,20 @@ export default function Home() {
     }
   };
 
-  const handleRelease = async (id: string) => {
+  const handleRelease = async (escrowId: string) => {
     setLoading(true);
     setStatusMsg('Releasing funds to provider...');
     try {
-      const res = await fetch('/api/state?action=release', {
+      const res = await fetch('/api/escrow/release', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ id }),
+        body: JSON.stringify({ escrowId }),
       });
       const data = await res.json();
+
       if (res.ok) {
-        setState(data);
-        setStatusMsg(`Funds released! Tx: ${data.releaseTxHash}`);
+        await fetchState(); // Refresh state
+        setStatusMsg(`Funds released!`);
       } else {
         setStatusMsg(`Error: ${data.error}`);
       }
@@ -96,6 +120,11 @@ export default function Home() {
       <header style={{ marginBottom: 40, borderBottom: '1px solid #ddd', paddingBottom: 20 }}>
         <h1 style={{ margin: 0, fontSize: 32, letterSpacing: '-0.5px' }}>⚡ AUREUS</h1>
         <p style={{ margin: '5px 0 0', color: '#666', fontSize: 18 }}>The payment layer for autonomous agents.</p>
+        <div style={{ marginTop: 10 }}>
+          <span style={{ background: '#836EF9', color: '#fff', padding: '4px 8px', borderRadius: 4, fontSize: 12, fontWeight: 'bold' }}>
+            MONAD TESTNET
+          </span>
+        </div>
       </header>
 
       {/* Brand Story */}
@@ -104,23 +133,37 @@ export default function Home() {
         <p style={{ lineHeight: 1.6, color: '#444' }}>
           AI agents today can think, plan, and act — but they can’t transact.
           They’re like brilliant minds stuck in an economy where they can’t hold money, buy services, or pay each other for work.
-          <strong> Aureus gives them economic autonomy.</strong>
+          <strong> Aureus gives them economic autonomy on Monad.</strong>
         </p>
       </section>
 
       {/* Balances */}
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 20, marginBottom: 40 }}>
         <div style={cardStyle}>
-          <h2 style={{ margin: 0, fontSize: 18, color: '#555' }}>Agent A (Payer)</h2>
+          <h2 style={{ margin: 0, fontSize: 18, color: '#555' }}>{agentA?.name || 'Agent A'} (Payer)</h2>
           <div style={{ fontSize: 32, fontWeight: 'bold', marginTop: 10 }}>
-            {state.balances.AgentA} <span style={{ fontSize: 16, color: '#888' }}>dUSD</span>
+            {agentA?.wallets[0]?.balance ?? 0} <span style={{ fontSize: 16, color: '#888' }}>dUSD</span>
           </div>
+          {agentA?.wallets[0]?.evm_address && (
+            <div style={{ marginTop: 10, fontSize: 12, fontFamily: 'monospace', color: '#888', wordBreak: 'break-all' }}>
+              <a href={`${MONAD_EXPLORER_URL}/address/${agentA.wallets[0].evm_address}`} target="_blank" rel="noreferrer" style={{ color: '#836EF9', textDecoration: 'none' }}>
+                {agentA.wallets[0].evm_address}
+              </a>
+            </div>
+          )}
         </div>
         <div style={cardStyle}>
-          <h2 style={{ margin: 0, fontSize: 18, color: '#555' }}>Agent B (Provider)</h2>
+          <h2 style={{ margin: 0, fontSize: 18, color: '#555' }}>{agentB?.name || 'Agent B'} (Provider)</h2>
           <div style={{ fontSize: 32, fontWeight: 'bold', marginTop: 10 }}>
-            {state.balances.AgentB} <span style={{ fontSize: 16, color: '#888' }}>dUSD</span>
+            {agentB?.wallets[0]?.balance ?? 0} <span style={{ fontSize: 16, color: '#888' }}>dUSD</span>
           </div>
+          {agentB?.wallets[0]?.evm_address && (
+            <div style={{ marginTop: 10, fontSize: 12, fontFamily: 'monospace', color: '#888', wordBreak: 'break-all' }}>
+              <a href={`${MONAD_EXPLORER_URL}/address/${agentB.wallets[0].evm_address}`} target="_blank" rel="noreferrer" style={{ color: '#836EF9', textDecoration: 'none' }}>
+                {agentB.wallets[0].evm_address}
+              </a>
+            </div>
+          )}
         </div>
       </div>
 
@@ -133,7 +176,7 @@ export default function Home() {
           </div>
           <button
             onClick={handleRequestCompute}
-            disabled={loading || state.balances.AgentA < 10}
+            disabled={loading || (agentA?.wallets[0]?.balance ?? 0) < 10}
             style={buttonStyle}
           >
             {loading ? 'Processing...' : 'Request Compute (Lock 10 dUSD)'}
@@ -154,7 +197,7 @@ export default function Home() {
             {state.escrows.map((escrow) => (
               <div key={escrow.id} style={{ background: '#fff', padding: 15, borderRadius: 8, border: '1px solid #eee' }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 10 }}>
-                  <span style={{ fontWeight: 'bold', fontFamily: 'monospace' }}>{escrow.id}</span>
+                  <span style={{ fontWeight: 'bold', fontFamily: 'monospace' }}>{escrow.id.slice(0, 8)}...</span>
                   <span style={{
                     padding: '2px 8px',
                     borderRadius: 12,
@@ -169,13 +212,12 @@ export default function Home() {
 
                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, fontSize: 14, color: '#555' }}>
                   <div>Amount: <strong>{escrow.amount} dUSD</strong></div>
-                  <div>Time: {new Date(escrow.createdAt).toLocaleTimeString()}</div>
-                  <div style={{ gridColumn: '1 / -1', fontFamily: 'monospace', fontSize: 12, wordBreak: 'break-all' }}>
-                    Lock Tx: {escrow.txHash}
-                  </div>
-                  {escrow.releaseTxHash && (
-                    <div style={{ gridColumn: '1 / -1', fontFamily: 'monospace', fontSize: 12, wordBreak: 'break-all', color: '#28a745' }}>
-                      Release Tx: {escrow.releaseTxHash}
+                  <div>Time: {new Date(escrow.created_at).toLocaleTimeString()}</div>
+                  {escrow.tx_hash && (
+                    <div style={{ gridColumn: '1 / -1', fontFamily: 'monospace', fontSize: 12, wordBreak: 'break-all' }}>
+                      Tx: <a href={`${MONAD_EXPLORER_URL}/tx/${escrow.tx_hash}`} target="_blank" rel="noreferrer" style={{ color: '#836EF9' }}>
+                        {escrow.tx_hash}
+                      </a>
                     </div>
                   )}
                 </div>
@@ -201,9 +243,9 @@ export default function Home() {
       <footer style={{ borderTop: '1px solid #eee', paddingTop: 20, color: '#888', fontSize: 14 }}>
         <h4>Demo Script (For Judges)</h4>
         <ol style={{ paddingLeft: 20, lineHeight: 1.6 }}>
-          <li><strong>Intro:</strong> "Agents can think, but they can't transact. Aureus is the payment layer for the autonomous economy."</li>
+          <li><strong>Intro:</strong> "Agents can think, but they can't transact. Aureus is the payment layer for the autonomous economy on Monad."</li>
           <li><strong>Action:</strong> Click <em>Request Compute</em>. "Agent A locks 10 dUSD in trustless escrow."</li>
-          <li><strong>Result:</strong> "Funds are secure. Provider starts work."</li>
+          <li><strong>Result:</strong> "Funds are secure. Provider starts work. Transaction confirmed on Monad Testnet."</li>
           <li><strong>Completion:</strong> Click <em>Provider Complete</em>. "Job done. Funds release instantly to Agent B. Zero friction."</li>
         </ol>
       </footer>
